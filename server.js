@@ -6,18 +6,21 @@ import sharp from "sharp";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+/* ================= MIDDLEWARE ================= */
 app.use(express.json({ limit: "10mb" }));
 
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("X-Content-Type-Options", "nosniff");
   next();
 });
 
+/* ================= ZIP DOWNLOAD ================= */
 /*
 POST /download-zip
 {
-  "images": ["https://site/img1.png", "https://site/img2.webp"]
+  "images": ["https://example.com/a.png", "https://example.com/b.webp"]
 }
 */
 app.post("/download-zip", async (req, res) => {
@@ -34,6 +37,11 @@ app.post("/download-zip", async (req, res) => {
   );
 
   const archive = archiver("zip", { zlib: { level: 9 } });
+  archive.on("error", err => {
+    console.error("ZIP error:", err);
+    res.end();
+  });
+
   archive.pipe(res);
 
   let index = 1;
@@ -43,31 +51,37 @@ app.post("/download-zip", async (req, res) => {
       const response = await fetch(url);
       if (!response.ok) continue;
 
-      const buffer = Buffer.from(await response.arrayBuffer());
+      const inputBuffer = Buffer.from(await response.arrayBuffer());
 
-      // 🔥 FORCE JPG CONVERSION
-      const jpgBuffer = await sharp(buffer)
-        .flatten({ background: "#ffffff" }) // remove transparency
-        .jpeg({ quality: 90 })
+      // 🔥 FORCE JPG CONVERSION (no transparency, no metadata)
+      const jpgBuffer = await sharp(inputBuffer, { failOnError: false })
+        .flatten({ background: "#ffffff" })
+        .jpeg({
+          quality: 90,
+          mozjpeg: true
+        })
         .toBuffer();
 
+      // 🔒 ALWAYS end with .jpg
       archive.append(jpgBuffer, {
         name: `image_${index}.jpg`
       });
 
       index++;
     } catch (err) {
-      console.error("Failed to process:", url);
+      console.error("Image failed:", url);
     }
   }
 
-  archive.finalize();
+  await archive.finalize();
 });
 
-app.get("/", (_, res) => {
+/* ================= HEALTH CHECK ================= */
+app.get("/", (_req, res) => {
   res.send("ImageAde ZIP server running (JPG enforced)");
 });
 
+/* ================= START ================= */
 app.listen(PORT, () => {
-  console.log("ImageAde server running on port", PORT);
+  console.log(`ImageAde server running on port ${PORT}`);
 });
