@@ -1,26 +1,23 @@
 import express from "express";
 import fetch from "node-fetch";
 import archiver from "archiver";
+import sharp from "sharp";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-/* ================= BASIC MIDDLEWARE ================= */
 app.use(express.json({ limit: "10mb" }));
 
-// Simple CORS (fine for now; lock later)
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   next();
 });
 
-/* ================= ZIP DOWNLOAD ENDPOINT ================= */
 /*
 POST /download-zip
-Body:
 {
-  "images": ["https://site/img1.jpg", "https://site/img2.png"]
+  "images": ["https://site/img1.png", "https://site/img2.webp"]
 }
 */
 app.post("/download-zip", async (req, res) => {
@@ -46,28 +43,31 @@ app.post("/download-zip", async (req, res) => {
       const response = await fetch(url);
       if (!response.ok) continue;
 
-      const contentType = response.headers.get("content-type") || "";
-      const ext = contentType.split("/")[1] || "jpg";
+      const buffer = Buffer.from(await response.arrayBuffer());
 
-      archive.append(response.body, {
-        name: `image_${index}.${ext}`
+      // 🔥 FORCE JPG CONVERSION
+      const jpgBuffer = await sharp(buffer)
+        .flatten({ background: "#ffffff" }) // remove transparency
+        .jpeg({ quality: 90 })
+        .toBuffer();
+
+      archive.append(jpgBuffer, {
+        name: `image_${index}.jpg`
       });
 
       index++;
     } catch (err) {
-      console.error("Failed to fetch:", url);
+      console.error("Failed to process:", url);
     }
   }
 
   archive.finalize();
 });
 
-/* ================= HEALTH CHECK ================= */
-app.get("/", (req, res) => {
-  res.send("ImageAde ZIP server running");
+app.get("/", (_, res) => {
+  res.send("ImageAde ZIP server running (JPG enforced)");
 });
 
-/* ================= START SERVER ================= */
 app.listen(PORT, () => {
-  console.log(`ImageAde server running on port ${PORT}`);
+  console.log("ImageAde server running on port", PORT);
 });
